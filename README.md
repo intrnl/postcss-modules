@@ -26,7 +26,7 @@ result.messages;
 
 ## Why?
 
-Differences between the original [`postcss-modules`][postcss-modules] plugin:
+Differences with the original [`postcss-modules`][postcss-modules] plugin:
 
 - Does not do linking/resolving whatsoever when composing classes.
   - This proves to be problematic when integrating the original plugin with build tools, the
