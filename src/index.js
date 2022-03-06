@@ -265,7 +265,9 @@ function stringify (node) {
 		case 'complex': {
 			return stringify(node.left) + node.combinator + stringify(node.right);
 		}
-		case 'list':
+		case 'list': {
+			return node.list.map((child) => stringify(child)).join(',');
+		}
 		case 'compound': {
 			return node.list.map((child) => stringify(child)).join('');
 		}
