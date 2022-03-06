@@ -1,7 +1,7 @@
 {
 	"name": "@intrnl/postcss-modules",
 	"description": "PostCSS plugin for transforming CSS modules",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"author": "intrnl",
 	"license": "MIT",
 	"repository": {
