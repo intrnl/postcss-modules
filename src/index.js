@@ -1,7 +1,7 @@
 const path = require('path');
 const crypto = require('crypto');
 
-const parser = require('postcss-selector-parser');
+const parsel = require('./parsel.js');
 
 
 const COMPOSES_RE = /^(?<name>[^\s]+?)(?:$|(?:\s+from\s+(?<specifier>global|(?<quote>['"]).+\k<quote>))$)/;
@@ -42,11 +42,11 @@ module.exports = (opts = {}) => {
 				// valid: .foo, .bar { ... }
 				// invalid: button { ... }
 				// invalid: .foo:has(.bar) { ... }
-				const selectors = parser().astSync(decl.parent.selector);
-				const names = retrieveSelectorNames(selectors);
+				const sel = parsel.parse(decl.parent.selector);
+				const names = retrieveSelectorNames(sel);
 
 				if (!names) {
-					throw decl.error(`composes cannot be used on a non-simple class selector`);
+					throw decl.error(`composes cannot be used with complex selectors`);
 				}
 
 				// local: composes: foo
@@ -101,11 +101,76 @@ module.exports = (opts = {}) => {
 			});
 
 			root.walkRules((rule) => {
-				const processor = parser(transformSelectors);
+				const globals = new WeakSet();
 
-				// this returns a string
-				const result = processor.processSync(rule.selector);
-				rule.selector = result;
+				const markAsGlobal = (node) => {
+					if (node.type === 'class' || node.type === 'id') {
+						globals.add(node);
+					}
+				};
+
+				let sel = parsel.parse(rule.selector);
+
+				const walker = (node, parent) => {
+					if (node.type === 'pseudo-class') {
+						const isLocal = node.name === 'local';
+						const isGlobal = node.name === 'global';
+
+						if (!isLocal && !isGlobal) {
+							return;
+						}
+
+						const args = parsel.parse(node.argument);
+
+						if (!args || args.type === 'list') {
+							throw rule.error(
+								`expected a single selector as argument to :${node.name}()`,
+								{ index: node.pos[0], endIndex: node.pos[1] },
+							);
+						}
+
+						if (isGlobal) {
+							parsel.walk(args, markAsGlobal);
+						}
+
+						parsel.walk(args, walker, node);
+
+						if (!parent) {
+							sel = args;
+						}
+						else if (parent.type === 'complex') {
+							if (parent.left === node) {
+								parent.left = args;
+							}
+							else if (parent.right === node) {
+								parent.right = args;
+							}
+						}
+						else if (parent.type === 'compound' || parent.type === 'list') {
+							const idx = parent.list.indexOf(node);
+
+							if (idx > -1) {
+								parent.list[idx] = args;
+							}
+						}
+
+						return;
+					}
+
+					if (node.type === 'class' || node.type === 'id') {
+						if (globals.has(node)) {
+							return;
+						}
+
+						const name = node.name;
+
+						node.name = retrieveLocal(name).local;
+						return;
+					}
+				};
+
+				parsel.walk(sel, walker);
+				rule.selector = stringify(sel);
 			});
 
 			result.messages.push({
@@ -114,63 +179,6 @@ module.exports = (opts = {}) => {
 				locals,
 			});
 
-			/**
-			 *
-			 * @param {parser.Root} selectors
-			 */
-			function transformSelectors (selectors) {
-				const globals = new WeakSet();
-				const seen = new WeakSet();
-
-				selectors.walk((node) => {
-					if (node.type === 'pseudo') {
-						const isLocal = node.value === ':local';
-						const isGlobal = node.value === ':global';
-
-						if (!isLocal && !isGlobal) {
-							return;
-						}
-
-						// :local, not a "call"
-						if (node.nodes.length < 1) {
-							return;
-						}
-
-						// :local(), a "call" but with no arguments
-						// :local(foo, bar)
-						if (node.nodes.length > 1 || node.nodes[0].nodes.length < 1) {
-							throw selectors.error(`expected a single selector as argument to ${node.value}()`);
-						}
-
-						const selector = node.nodes[0];
-
-						if (isGlobal) {
-							globals.add(selector);
-						}
-
-						node.replaceWith(selector);
-						return;
-					}
-
-					if (node.type === 'class' || node.type === 'id') {
-						if (seen.has(node)) {
-							return;
-						}
-
-						seen.add(node);
-
-						if (globals.has(node.parent)) {
-							return;
-						}
-
-						const name = node.value;
-
-						node.value = retrieveLocal(name).local;
-						return;
-					}
-				});
-			}
-
 			function retrieveLocal (name) {
 				return locals[name] ||= {
 					local: generateScopedName(name, root.source?.input.file),
@@ -178,21 +186,24 @@ module.exports = (opts = {}) => {
 				};
 			}
 
-			function retrieveSelectorNames (selectors) {
+			function retrieveSelectorNames (node) {
 				const names = [];
 
-				for (const selector of selectors.nodes) {
-					if (selector.nodes.length !== 1) {
-						return false;
+				if (node.type === 'list') {
+					for (const child of node.list) {
+						if (node.type === 'class' || node.type === 'id') {
+							names.push(child.name);
+						}
+						else {
+							return false;
+						}
 					}
-
-					const node = selector.nodes[0];
-
-					if (node.type !== 'class' && node.type !== 'id') {
-						return false;
-					}
-
-					names.push(node.value);
+				}
+				else if (node.type === 'class' || node.type === 'id') {
+					names.push(node.name);
+				}
+				else {
+					return false;
 				}
 
 				return names;
@@ -202,3 +213,61 @@ module.exports = (opts = {}) => {
 };
 
 module.exports.postcss = true;
+
+function stringify (node) {
+	if (typeof node === 'string') {
+		return node;
+	}
+
+	if (!node) {
+		return '';
+	}
+
+	switch (node.type) {
+		case 'type': {
+			return node.name;
+		}
+		case 'class': {
+			return '.' + node.name;
+		}
+		case 'id': {
+			return '.' + node.name;
+		}
+		case 'attribute': {
+			if (node.operator) {
+				return '[' + node.name + node.operator + node.value + ']';
+			}
+
+			return '[' + node.name + ']';
+		}
+		case 'pseudo-element': {
+			if (node.subtree) {
+				return '::' + node.name + stringify(node.subtree);
+			}
+
+			if (node.argument) {
+				return '::' + node.name + '(' + node.argument + ')';
+			}
+
+			return '::' + node.name;
+		}
+		case 'pseudo-class': {
+			if (node.subtree) {
+				return ':' + node.name + '(' + stringify(node.subtree) + ')';
+			}
+
+			if (node.argument) {
+				return ':' + node.name + '(' + node.argument + ')';
+			}
+
+			return ':' + node.name;
+		}
+		case 'complex': {
+			return stringify(node.left) + node.combinator + stringify(node.right);
+		}
+		case 'list':
+		case 'compound': {
+			return node.list.map((child) => stringify(child)).join('');
+		}
+	}
+}
