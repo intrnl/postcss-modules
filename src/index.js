@@ -6,7 +6,7 @@ const parsel = require('./parsel.js');
 
 const COMPOSES_RE = /^(?<name>[^\s]+?)(?:$|(?:\s+from\s+(?<specifier>global|(?<quote>['"]).+\k<quote>))$)/;
 
-function defaultGenerateScopedName (local, filename) {
+function generateLongScopedName (local, filename, index) {
 	const hash = crypto.createHash('md5');
 	hash.update(filename ? path.relative('.', filename) : '');
 
@@ -15,14 +15,25 @@ function defaultGenerateScopedName (local, filename) {
 	return `${local}_${digest.slice(0, 6)}`;
 }
 
+function generateShortScopedName (local, filename, index) {
+	const hash = crypto.createHash('md5');
+	hash.update(filename ? path.relative('.', filename) : '');
+
+	let digest = hash.digest('base64url');
+	let start = digest.charCodeAt(0);
+
+	return `${(start >= 65 && start <= 90) ? '_' : ''}${digest.slice(0, 6)}${index}`;
+}
+
 /** @returns {import('postcss').Plugin} */
 module.exports = (opts = {}) => {
-	const { generateScopedName = defaultGenerateScopedName } = opts;
+	const { generateScopedName = generateLongScopedName } = opts;
 
 	return {
 		postcssPlugin: '@intrnl/postcss-modules',
 		OnceExit (root, { result }) {
 			const locals = Object.create(null);
+			let index = 0;
 
 			root.walkAtRules('keyframes', (rule) => {
 				const name = rule.params;
@@ -181,7 +192,7 @@ module.exports = (opts = {}) => {
 
 			function retrieveLocal (name) {
 				return locals[name] ||= {
-					local: generateScopedName(name, root.source?.input.file),
+					local: generateScopedName(name, root.source?.input.file, index++),
 					composes: [],
 				};
 			}
@@ -213,6 +224,8 @@ module.exports = (opts = {}) => {
 };
 
 module.exports.postcss = true;
+module.exports.generateLongScopedName = generateLongScopedName;
+module.exports.generateShortScopedName = generateShortScopedName;
 
 function stringify (node) {
 	if (typeof node === 'string') {
