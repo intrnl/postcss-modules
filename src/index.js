@@ -19,10 +19,12 @@ function generateShortScopedName (local, filename, index) {
 	const hash = crypto.createHash('md5');
 	hash.update(filename ? path.relative('.', filename) : '');
 
-	let digest = hash.digest('base64url');
-	let start = digest.charCodeAt(0);
+	const digest = hash.digest('base64url');
 
-	return `${(start >= 65 && start <= 90) ? '_' : ''}${digest.slice(0, 6)}${index}`;
+	const start = digest.charCodeAt(0);
+	const isAlpha = (start >= 97 && start <= 122) || (start >= 65 && start <= 90);
+
+	return `${!isAlpha ? '_' : ''}${digest.slice(0, 6)}${index}`;
 }
 
 /** @returns {import('postcss').Plugin} */
