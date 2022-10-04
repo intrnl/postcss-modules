@@ -27,6 +27,37 @@ function generateShortScopedName (local, filename, index) {
 	return `${!isAlpha ? '_' : ''}${digest.slice(0, 6)}${index}`;
 }
 
+function createTinyScopedName () {
+	const alpha = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+	const numeric = letters + '0123456789';
+	const alphanumeric = alpha + numeric;
+
+	const filenames = new Map();
+
+	return function generateScopedName (local, filename, index) {
+		let filescope = filenames.get(filename);
+
+		if (!filescope) {
+			filescope = base(alpha, filenames.size);
+			filenames.set(filename, filescope);
+		}
+
+		const scope = filescope + base(alphanumeric, index);
+		return scope;
+	}
+
+	function base (source, count) {
+		let str = '';
+
+		while (count >= 0) {
+			str += source[Math.min(count, source.length - 1)];
+			count -= source.length;
+		}
+
+		return str;
+	}
+}
+
 /** @returns {import('postcss').Plugin} */
 module.exports = (opts = {}) => {
 	const { generateScopedName = generateLongScopedName } = opts;
@@ -228,6 +259,7 @@ module.exports = (opts = {}) => {
 module.exports.postcss = true;
 module.exports.generateLongScopedName = generateLongScopedName;
 module.exports.generateShortScopedName = generateShortScopedName;
+module.exports.createTinyScopedName = createTinyScopedName;
 
 function stringify (node) {
 	if (typeof node === 'string') {
