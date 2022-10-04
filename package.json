@@ -5,7 +5,7 @@
 	"author": "intrnl",
 	"license": "MIT",
 	"repository": {
-		"url": "https://github.com/intrnl/postcss-modules"
+		"url": "https://codeberg.org/intrnl/postcss-modules"
 	},
 	"files": [
 		"src/"
